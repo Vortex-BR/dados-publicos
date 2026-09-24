@@ -1,0 +1,36 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: campania_tse
+      POSTGRES_USER: campania_tse
+      POSTGRES_PASSWORD: local-development-only
+    volumes:
+      - tse-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U campania_tse -d campania_tse"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build: .
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      NODE_ENV: development
+      HOST: 0.0.0.0
+      PORT: 3000
+      DATABASE_URL: postgres://campania_tse:local-development-only@postgres:5432/campania_tse
+      DATABASE_SSL: "false"
+      API_KEYS: local-public-api-key-12345678901234567890
+      ADMIN_API_KEY: local-admin-api-key-12345678901234567890
+      CORS_ORIGINS: http://localhost:3000
+      TSE_ENVIRONMENT: simulado
+      AUTO_SYNC_ENABLED: "true"
+    ports:
+      - "3000:3000"
+
+volumes:
+  tse-postgres:

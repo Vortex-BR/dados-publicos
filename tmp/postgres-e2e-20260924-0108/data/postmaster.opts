@@ -1,0 +1,1 @@
+C:/Program Files/PostgreSQL/17/bin/postgres.exe "-D" "C:/Users/windows/Downloads/campania-ninja/easypanel/tse-collector/tmp/postgres-e2e-20260924-0108/data" "-p" "55433" "-h" "127.0.0.1"
