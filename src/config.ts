@@ -28,8 +28,26 @@ const schema = z.object({
   TSE_ENVIRONMENT: z.enum(["oficial", "simulado"]).default("oficial"),
   TSE_POLL_INTERVAL_SECONDS: z.coerce.number().int().min(60).max(3_600).default(60),
   TSE_REQUEST_TIMEOUT_SECONDS: z.coerce.number().int().min(5).max(60).default(15),
-  TSE_NEWTON_BONIN_SQ_CANDIDATO: z.string().trim().default(""),
-  TSE_NEWTON_BONIN_NUMERO: z.string().trim().default(""),
+  TSE_NEWTON_BONIN_SQ_CANDIDATO: z
+    .string()
+    .trim()
+    .regex(/^\d+$/, "deve conter somente numeros")
+    .default("160002540768"),
+  TSE_NEWTON_BONIN_NUMERO: z
+    .string()
+    .trim()
+    .regex(/^\d{4}$/, "deve possuir quatro digitos")
+    .default("1023"),
+  TSE_SIMULADO_CANDIDATO_SQ_CANDIDATO: z
+    .string()
+    .trim()
+    .regex(/^\d+$/, "deve conter somente numeros")
+    .default("41645079"),
+  TSE_SIMULADO_CANDIDATO_NUMERO: z
+    .string()
+    .trim()
+    .regex(/^\d{4}$/, "deve possuir quatro digitos")
+    .default("9010"),
 });
 
 const parsed = schema.safeParse(process.env);

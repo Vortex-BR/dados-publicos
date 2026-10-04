@@ -6,6 +6,7 @@ export const TECHNICAL_URL =
   "https://www.tse.jus.br/eleicoes/informacoes-tecnicas-sobre-a-divulgacao-de-resultados";
 export const FIRST_ROUND_START = new Date("2026-10-04T17:00:00-03:00");
 export const SECOND_ROUND_START = new Date("2026-10-25T17:00:00-03:00");
+export const CONFIG_PREFLIGHT_START = new Date("2026-10-03T00:00:00-03:00");
 
 export type TseSettings = {
   environment: Environment;
@@ -15,6 +16,7 @@ export type TseSettings = {
   pleitoId: string;
   presidentElectionId: string;
   deputyElectionId: string;
+  secondRoundPresidentElectionId: string;
 };
 
 export function tseSettings(environment: Environment = config.TSE_ENVIRONMENT): TseSettings {
@@ -27,17 +29,66 @@ export function tseSettings(environment: Environment = config.TSE_ENVIRONMENT): 
       pleitoId: "17801",
       presidentElectionId: "21270",
       deputyElectionId: "21272",
+      secondRoundPresidentElectionId: "21271",
     };
   }
   return {
     environment,
     official: true,
     root: "https://resultados.tse.jus.br/oficial/ele2026",
-    configUrl: "https://resultados.tse.jus.br/oficial/ele2026/comum/config/ele-c.json",
+    configUrl: "https://resultados.tse.jus.br/oficial/comum/config/ele-c.json",
     pleitoId: "3220",
     presidentElectionId: "6257",
     deputyElectionId: "6259",
+    secondRoundPresidentElectionId: "",
   };
+}
+
+export function resolveElectionSettings(
+  payload: Record<string, unknown>,
+  baseSettings = tseSettings(),
+): TseSettings {
+  const expectedPhase = baseSettings.official ? "o" : "s";
+  if (text(payload.f).toLowerCase() !== expectedPhase) {
+    throw new Error("O arquivo EA11 pertence a uma fase diferente da configurada.");
+  }
+
+  for (const pleitoValue of array(payload.pl)) {
+    const pleito = record(pleitoValue);
+    if (text(pleito.c).toLowerCase() !== "ele2026") continue;
+    let president: Record<string, unknown> | null = null;
+    let deputy: Record<string, unknown> | null = null;
+    for (const electionValue of array(pleito.e)) {
+      const election = record(electionValue);
+      if (text(election.t) !== "1") continue;
+      if (text(election.tp) === "8" && electionHasCargo(election, "1")) president = election;
+      if (text(election.tp) === "1" && electionHasCargo(election, "6")) deputy = election;
+    }
+    if (president && deputy) {
+      return {
+        ...baseSettings,
+        pleitoId: requiredIdentifier(pleito.cd, "codigo do pleito"),
+        presidentElectionId: requiredIdentifier(president.cd, "eleicao presidencial"),
+        deputyElectionId: requiredIdentifier(deputy.cd, "eleicao estadual"),
+        secondRoundPresidentElectionId: text(president.cdt2),
+      };
+    }
+  }
+  throw new Error(
+    "O EA11 nao contem, no mesmo pleito de 2026, Presidente e Deputado Federal no primeiro turno.",
+  );
+}
+
+function electionHasCargo(election: Record<string, unknown>, cargoCode: string) {
+  return array(election.abr).some((scopeValue) =>
+    array(record(scopeValue).cp).some((cargoValue) => text(record(cargoValue).cd) === cargoCode),
+  );
+}
+
+function requiredIdentifier(value: unknown, label: string) {
+  const identifier = text(value);
+  if (!/^\d+$/.test(identifier)) throw new Error(`O EA11 nao informou um ${label} valido.`);
+  return identifier;
 }
 
 export function resultWindowIsOpen(settings = tseSettings(), now = new Date()) {
@@ -119,6 +170,13 @@ export class TseHttpError extends Error {
   }
 }
 
+export class TargetCandidateError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "TargetCandidateError";
+  }
+}
+
 export async function fetchTseJson(url: string, options: FetchOptions = {}): Promise<FetchResult> {
   const parsed = new URL(url);
   if (
@@ -129,7 +187,7 @@ export async function fetchTseJson(url: string, options: FetchOptions = {}): Pro
   }
   const headers = new Headers({
     Accept: "application/json",
-    "User-Agent": "Campania-Ninja-TSE-Collector/1.0",
+    "User-Agent": "Campania-Ninja-TSE-Collector/1.1.1",
   });
   if (options.etag) headers.set("If-None-Match", options.etag);
   if (options.lastModified) headers.set("If-Modified-Since", options.lastModified);
@@ -205,8 +263,8 @@ export function normalizePayload(
 
   let targetCandidate: Candidate | null = null;
   if (targetDefinition.cargo === "deputado_federal") {
-    targetCandidate = findNewtonBonin(candidates);
-    candidates = targetCandidate ? [targetCandidate] : [];
+    targetCandidate = findTargetCandidate(candidates, settings);
+    candidates = [targetCandidate];
   }
 
   const sections = record(payload.s);
@@ -223,7 +281,7 @@ export function normalizePayload(
     pleitoId: targetDefinition.pleitoId,
     idg: text(payload.idg),
     generatedAt: generatedAt(payload),
-    final: text(payload.and).toLowerCase() === "f",
+    final: text(payload.tf).toLowerCase() === "s",
     sections: {
       total: integer(sections.ts),
       totalized: integer(sections.st),
@@ -247,13 +305,23 @@ export function normalizePayload(
 }
 
 function validatePayload(payload: Record<string, unknown>, definition: Target) {
+  const expectedPhase = definition.key.startsWith("oficial-") ? "o" : "s";
+  if (text(payload.f).toLowerCase() !== expectedPhase)
+    throw new Error("O arquivo do TSE pertence a outra fase de divulgação.");
   if (text(payload.ele) !== definition.electionId)
     throw new Error("O arquivo do TSE pertence a outra eleição.");
+  if (text(payload.t) !== String(definition.turn))
+    throw new Error("O arquivo do TSE pertence a outro turno.");
+  const expectedScopeType = definition.scope === "br" ? "br" : "uf";
+  if (text(payload.tpabr).toLowerCase() !== expectedScopeType)
+    throw new Error("O arquivo do TSE possui outro tipo de abrangência.");
   if (text(payload.cdabr).toLowerCase() !== definition.scope)
     throw new Error("O arquivo do TSE possui outra abrangência.");
   const cargo = record(array(payload.carg)[0]);
   if (text(cargo.cd).padStart(4, "0") !== definition.cargoCode)
     throw new Error("O arquivo do TSE pertence a outro cargo.");
+  if (definition.cargo === "presidente" && text(payload.dv).toLowerCase() !== "s")
+    throw new Error("O TSE ainda não autorizou a divulgação da votação presidencial.");
 }
 
 function flattenCandidates(cargo: Record<string, unknown>): Candidate[] {
@@ -290,22 +358,40 @@ function flattenCandidates(cargo: Record<string, unknown>): Candidate[] {
   return candidates;
 }
 
-function findNewtonBonin(candidates: Candidate[]): Candidate | null {
-  if (config.TSE_NEWTON_BONIN_SQ_CANDIDATO) {
-    const candidate = candidates.find(
-      (item) => item.sqCand === config.TSE_NEWTON_BONIN_SQ_CANDIDATO,
+function findTargetCandidate(candidates: Candidate[], settings: TseSettings): Candidate {
+  const expected =
+    settings.environment === "simulado"
+      ? {
+          sqCand: config.TSE_SIMULADO_CANDIDATO_SQ_CANDIDATO,
+          number: config.TSE_SIMULADO_CANDIDATO_NUMERO,
+          label: "candidato ficticio do simulado",
+        }
+      : {
+          sqCand: config.TSE_NEWTON_BONIN_SQ_CANDIDATO,
+          number: config.TSE_NEWTON_BONIN_NUMERO,
+          label: "Newton Bonin",
+        };
+
+  const candidate = candidates.find((item) => item.sqCand === expected.sqCand);
+  if (!candidate) {
+    throw new TargetCandidateError(
+      `O ${expected.label} nao foi localizado no arquivo do TSE pelo SQ_CANDIDATO ${expected.sqCand}.`,
     );
-    if (candidate) return { ...candidate, identifiedBy: "sq_candidato" };
   }
-  if (config.TSE_NEWTON_BONIN_NUMERO) {
-    const candidate = candidates.find((item) => item.number === config.TSE_NEWTON_BONIN_NUMERO);
-    if (candidate) return { ...candidate, identifiedBy: "numero" };
+  if (candidate.number !== expected.number) {
+    throw new TargetCandidateError(
+      `O SQ_CANDIDATO ${expected.sqCand} foi encontrado, mas possui o numero ${candidate.number} em vez de ${expected.number}.`,
+    );
   }
-  const candidate = candidates.find((item) => {
-    const name = normalizeName(`${item.name} ${item.ballotName}`);
-    return name.includes("NEWTON") && name.includes("BONIN");
-  });
-  return candidate ? { ...candidate, identifiedBy: "nome" } : null;
+  if (settings.official) {
+    const name = normalizeName(`${candidate.name} ${candidate.ballotName}`);
+    if (!name.includes("NEWTON") || !name.includes("BONIN")) {
+      throw new TargetCandidateError(
+        `O SQ_CANDIDATO ${expected.sqCand} e o numero ${expected.number} nao pertencem a Newton Bonin no arquivo do TSE.`,
+      );
+    }
+  }
+  return { ...candidate, identifiedBy: "sq_candidato" };
 }
 
 function normalizeName(value: string) {

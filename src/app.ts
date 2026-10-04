@@ -34,7 +34,7 @@ export async function createApp() {
     openapi: {
       info: {
         title: "Campania Ninja — API de Apuração TSE 2026",
-        version: "1.0.0",
+        version: "1.1.1",
         description: "Resultados oficiais do TSE normalizados e armazenados em PostgreSQL.",
       },
       components: {
@@ -51,7 +51,7 @@ export async function createApp() {
 
   app.get("/", async () => ({
     service: "campania-ninja-tse-collector",
-    version: "1.0.0",
+    version: "1.1.1",
     documentation: "/docs",
     health: "/health/ready",
   }));

@@ -8,7 +8,16 @@ Serviço independente para Easypanel que consulta exclusivamente os arquivos JSO
 - Deputado Federal — Paraná, com identificação específica de Newton Bonin;
 - eventual segundo turno presidencial, descoberto pelo arquivo `ele-c.json` do TSE.
 
+No ambiente `simulado`, o alvo para Deputado Federal é o candidato fictício configurado em
+`TSE_SIMULADO_CANDIDATO_SQ_CANDIDATO` e `TSE_SIMULADO_CANDIDATO_NUMERO`. No ambiente `oficial`,
+o alvo é obrigatoriamente Newton Bonin (`TSE_NEWTON_BONIN_SQ_CANDIDATO` e
+`TSE_NEWTON_BONIN_NUMERO`). O SQ, o número e, em produção, o nome precisam conferir no mesmo
+registro; caso contrário a coleta falha, mantém o último resultado válido e publica estado de erro.
+
 O serviço rejeita outros domínios, cargos e abrangências. No ambiente oficial, nenhuma consulta de resultados é feita antes de 4 de outubro de 2026 às 17h de Brasília.
+O arquivo EA11 oficial é validado a partir de 3 de outubro e define os códigos efetivos do pleito,
+das eleições de primeiro turno e do eventual segundo turno. A coleta também confere fase, turno,
+tipo de abrangência e autorização de divulgação informados pelo TSE.
 
 ## API
 
@@ -40,6 +49,9 @@ curl -H "X-API-Key: SUA_CHAVE" https://tse-api.seudominio.com.br/v1/apuracao
 - erros `404` ou `429` ativam recuo de dez minutos;
 - uma versão histórica só é gravada quando o SHA-256 do arquivo muda;
 - o último resultado válido continua disponível durante indisponibilidades do TSE;
+- candidato-alvo ausente ou com identificadores divergentes nunca é gravado como válido;
+- somente `tf=s` no EA20 encerra a coleta como totalização final;
+- o healthcheck do contêiner verifica aplicação e PostgreSQL em `/health/ready`;
 - migrações são executadas automaticamente e de forma serializada na inicialização;
 - encerramento por `SIGTERM` fecha HTTP, agenda e conexões PostgreSQL corretamente.
 

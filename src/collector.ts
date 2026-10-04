@@ -13,19 +13,21 @@ import {
   withCollectorLock,
 } from "./repository.js";
 import {
+  CONFIG_PREFLIGHT_START,
   FIRST_ROUND_START,
   SECOND_ROUND_START,
   TECHNICAL_URL,
   TseHttpError,
-  discoverSecondRoundElection,
   fetchTseJson,
   firstRoundTargets,
   normalizePayload,
   payloadHash,
+  resolveElectionSettings,
   resultWindowIsOpen,
   secondRoundPresidentTarget,
   tseSettings,
 } from "./tse.js";
+import type { TseSettings } from "./tse.js";
 import type { SyncReport, Target } from "./types.js";
 
 type Logger = {
@@ -36,7 +38,7 @@ type Logger = {
 
 type Backoff = { until: string; message: string; status: number; at: string };
 type LastError = { message: string; code: number; at: string; target: string };
-type ElectionConfig = { electionId: string; checkedAt: string };
+type ElectionConfig = { settings: TseSettings; checkedAt: string };
 
 const settings = tseSettings();
 
@@ -69,33 +71,43 @@ export class Collector {
     };
     try {
       if (!resultWindowIsOpen(settings)) {
+        if (settings.official && Date.now() >= CONFIG_PREFLIGHT_START.getTime()) {
+          await this.resolveSettings();
+          await Promise.all([
+            clearState(this.stateKey("last-error")),
+            clearState(this.stateKey("backoff")),
+          ]);
+          report.reason = "Configuração EA11 oficial validada; aguardando abertura da apuração.";
+        } else {
+          report.reason = "A janela oficial da apuração ainda não foi aberta.";
+        }
         report.status = "skipped";
-        report.reason = "A janela oficial da apuração ainda não foi aberta.";
         return report;
       }
 
       const backoff = await getState<Backoff>(this.stateKey("backoff"));
-      if (backoff && new Date(backoff.until).getTime() > Date.now()) {
+      if (!force && backoff && new Date(backoff.until).getTime() > Date.now()) {
         report.status = "skipped";
         report.reason = `Recuo de segurança ativo até ${backoff.until}.`;
         return report;
       }
 
-      const targets = await this.targets();
+      const effectiveSettings = await this.resolveSettings();
+      const targets = this.targets(effectiveSettings);
       for (const target of targets) {
         const previous = await getStoredResult(target.key);
         if (previous?.final && !force) continue;
         try {
           const fetched = await fetchTseJson(target.url, {
-            etag: previous?.sourceEtag ?? null,
-            lastModified: previous?.sourceLastModified ?? null,
+            etag: force ? null : (previous?.sourceEtag ?? null),
+            lastModified: force ? null : (previous?.sourceLastModified ?? null),
           });
           report.fetched += 1;
           if (fetched.status === "not-modified") {
             await touchNotModified(target.key, fetched.etag, fetched.lastModified);
             continue;
           }
-          const normalized = normalizePayload(fetched.payload, target, settings);
+          const normalized = normalizePayload(fetched.payload, target, effectiveSettings);
           const changed = await saveResult(normalized, {
             payloadSha256: payloadHash(fetched.raw),
             etag: fetched.etag,
@@ -153,21 +165,42 @@ export class Collector {
     }
   }
 
-  private async targets(): Promise<Target[]> {
-    const targets = firstRoundTargets(settings);
+  private targets(effectiveSettings: TseSettings): Target[] {
+    const targets = firstRoundTargets(effectiveSettings);
     if (Date.now() < SECOND_ROUND_START.getTime()) return targets;
+    if (!effectiveSettings.secondRoundPresidentElectionId)
+      throw new Error("O EA11 não informou o código da eleição presidencial de segundo turno.");
+    return [
+      ...targets,
+      secondRoundPresidentTarget(
+        effectiveSettings.secondRoundPresidentElectionId,
+        effectiveSettings,
+      ),
+    ];
+  }
 
-    const key = this.stateKey("president-second-round");
+  private async resolveSettings(): Promise<TseSettings> {
+    const key = this.stateKey("election-config");
     const cached = await getState<ElectionConfig>(key);
-    if (cached?.electionId)
-      return [...targets, secondRoundPresidentTarget(cached.electionId, settings)];
-    if (cached && new Date(cached.checkedAt).getTime() > Date.now() - 5 * 60_000) return targets;
-
-    const fetched = await fetchTseJson(settings.configUrl);
-    if (fetched.status === "not-modified") return targets;
-    const electionId = discoverSecondRoundElection(fetched.payload, settings.presidentElectionId);
-    await setState(key, { electionId, checkedAt: new Date().toISOString() });
-    return electionId ? [...targets, secondRoundPresidentTarget(electionId, settings)] : targets;
+    try {
+      const fetched = await fetchTseJson(settings.configUrl);
+      if (fetched.status === "not-modified") {
+        if (cached?.settings) return cached.settings;
+        throw new Error("O TSE respondeu 304 sem existir uma configuração EA11 armazenada.");
+      }
+      const resolved = resolveElectionSettings(fetched.payload, settings);
+      await setState(key, { settings: resolved, checkedAt: new Date().toISOString() });
+      return resolved;
+    } catch (error) {
+      if (cached?.settings) {
+        this.logger.warn(
+          { error: error instanceof Error ? error.message : String(error) },
+          "Não foi possível atualizar o EA11; usando a última configuração validada",
+        );
+        return cached.settings;
+      }
+      throw error;
+    }
   }
 
   private async rememberError(target: Target | null, message: string, status: number) {
@@ -191,20 +224,22 @@ export class Collector {
   }
 
   async apiPayload() {
-    const [rows, lastError, backoff] = await Promise.all([
+    const [rows, lastError, backoff, electionConfig] = await Promise.all([
       listStoredResults(settings.environment),
       getState<LastError>(this.stateKey("last-error")),
       getState<Backoff>(this.stateKey("backoff")),
+      getState<ElectionConfig>(this.stateKey("election-config")),
     ]);
+    const effectiveSettings = electionConfig?.settings ?? settings;
     const contests = rows.map(
       ({ payloadSha256: _hash, sourceEtag: _etag, sourceLastModified: _modified, ...row }) => row,
     );
     const windowOpen = resultWindowIsOpen(settings);
     const allFinal = contests.length > 0 && contests.every((contest) => contest.final);
-    const status = !contests.length
-      ? windowOpen && lastError
-        ? "erro"
-        : "aguardando"
+    const status = lastError
+      ? "erro"
+      : !contests.length
+        ? "aguardando"
       : allFinal
         ? "finalizado"
         : "apurando";
@@ -222,7 +257,12 @@ export class Collector {
         name: "Tribunal Superior Eleitoral (TSE)",
         official: settings.official,
         environment: settings.environment,
-        baseUrl: settings.root,
+        baseUrl: effectiveSettings.root,
+        configurationUrl: effectiveSettings.configUrl,
+        configurationCheckedAt: electionConfig?.checkedAt ?? null,
+        pleitoId: effectiveSettings.pleitoId,
+        presidentElectionId: effectiveSettings.presidentElectionId,
+        deputyElectionId: effectiveSettings.deputyElectionId,
         technicalUrl: TECHNICAL_URL,
         exclusive: true,
       },
@@ -237,7 +277,7 @@ export class Collector {
       collector: {
         service: "campania-ninja-tse-collector",
         storage: "postgresql",
-        version: "1.0.0",
+        version: "1.1.1",
       },
     };
   }

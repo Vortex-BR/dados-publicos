@@ -39,13 +39,13 @@ DATABASE_URL=URL_INTERNA_COPIADA_DO_POSTGRES
 DATABASE_SSL=false
 API_KEYS=CHAVE_DE_LEITURA_COM_32_OU_MAIS_CARACTERES
 ADMIN_API_KEY=OUTRA_CHAVE_COM_32_OU_MAIS_CARACTERES
-CORS_ORIGINS=https://crm.seudominio.com.br
+CORS_ORIGINS=https://crm.newtonbonin.com.br
 AUTO_SYNC_ENABLED=true
 TSE_ENVIRONMENT=oficial
 TSE_POLL_INTERVAL_SECONDS=60
 TSE_REQUEST_TIMEOUT_SECONDS=15
-TSE_NEWTON_BONIN_SQ_CANDIDATO=
-TSE_NEWTON_BONIN_NUMERO=
+TSE_NEWTON_BONIN_SQ_CANDIDATO=160002540768
+TSE_NEWTON_BONIN_NUMERO=1023
 ```
 
 Gere cada chave com:
@@ -58,7 +58,7 @@ Não use `TSE_ENVIRONMENT=simulado` em produção. Depois da consolidação do r
 
 ## 4. Domínio e saúde
 
-1. Crie um domínio HTTPS, por exemplo `tse-api.seudominio.com.br`.
+1. Use o domínio HTTPS `dados-publicos-tse.fwotmy.easypanel.host`.
 2. Direcione-o para a porta interna `3000` usando protocolo HTTP.
 3. Use `/health/ready` como verificação de prontidão.
 4. Não publique a porta `5432` do PostgreSQL.
