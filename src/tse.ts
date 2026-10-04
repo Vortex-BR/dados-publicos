@@ -187,7 +187,7 @@ export async function fetchTseJson(url: string, options: FetchOptions = {}): Pro
   }
   const headers = new Headers({
     Accept: "application/json",
-    "User-Agent": "Campania-Ninja-TSE-Collector/1.1.1",
+    "User-Agent": "Campania-Ninja-TSE-Collector/1.1.2",
   });
   if (options.etag) headers.set("If-None-Match", options.etag);
   if (options.lastModified) headers.set("If-Modified-Since", options.lastModified);
@@ -264,7 +264,6 @@ export function normalizePayload(
   let targetCandidate: Candidate | null = null;
   if (targetDefinition.cargo === "deputado_federal") {
     targetCandidate = findTargetCandidate(candidates, settings);
-    candidates = [targetCandidate];
   }
 
   const sections = record(payload.s);

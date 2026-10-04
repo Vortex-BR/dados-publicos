@@ -26,7 +26,7 @@ const schema = z.object({
     .default("true")
     .transform((value) => value === "true" || value === "1"),
   TSE_ENVIRONMENT: z.enum(["oficial", "simulado"]).default("oficial"),
-  TSE_POLL_INTERVAL_SECONDS: z.coerce.number().int().min(60).max(3_600).default(60),
+  TSE_POLL_INTERVAL_SECONDS: z.coerce.number().int().min(5).max(3_600).default(5),
   TSE_REQUEST_TIMEOUT_SECONDS: z.coerce.number().int().min(5).max(60).default(15),
   TSE_NEWTON_BONIN_SQ_CANDIDATO: z
     .string()

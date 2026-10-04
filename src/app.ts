@@ -34,7 +34,7 @@ export async function createApp() {
     openapi: {
       info: {
         title: "Campania Ninja — API de Apuração TSE 2026",
-        version: "1.1.1",
+        version: "1.1.2",
         description: "Resultados oficiais do TSE normalizados e armazenados em PostgreSQL.",
       },
       components: {
@@ -51,7 +51,7 @@ export async function createApp() {
 
   app.get("/", async () => ({
     service: "campania-ninja-tse-collector",
-    version: "1.1.1",
+    version: "1.1.2",
     documentation: "/docs",
     health: "/health/ready",
   }));
@@ -75,7 +75,7 @@ export async function createApp() {
     "/v1/apuracao",
     { schema: { security: [{ ApiKeyAuth: [] }] } },
     async (_request, reply) => {
-      reply.header("Cache-Control", "private, max-age=15, stale-while-revalidate=30");
+      reply.header("Cache-Control", "private, max-age=3, stale-while-revalidate=5");
       return collector.apiPayload();
     },
   );
@@ -85,7 +85,7 @@ export async function createApp() {
     { schema: { security: [{ ApiKeyAuth: [] }] } },
     async (_request, reply) => {
       const payload = await collector.apiPayload();
-      reply.header("Cache-Control", "private, max-age=15, stale-while-revalidate=30");
+      reply.header("Cache-Control", "private, max-age=3, stale-while-revalidate=5");
       return {
         ...payload,
         contests: payload.contests.filter((contest) => contest.cargo === "presidente"),
@@ -98,7 +98,7 @@ export async function createApp() {
     { schema: { security: [{ ApiKeyAuth: [] }] } },
     async (_request, reply) => {
       const payload = await collector.apiPayload();
-      reply.header("Cache-Control", "private, max-age=15, stale-while-revalidate=30");
+      reply.header("Cache-Control", "private, max-age=3, stale-while-revalidate=5");
       return {
         ...payload,
         contests: payload.contests.filter((contest) => contest.cargo === "deputado_federal"),

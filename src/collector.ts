@@ -98,9 +98,14 @@ export class Collector {
         const previous = await getStoredResult(target.key);
         if (previous?.final && !force) continue;
         try {
+          const needsFullDeputyRanking =
+            target.cargo === "deputado_federal" &&
+            !!previous &&
+            previous.candidates.length < 3;
           const fetched = await fetchTseJson(target.url, {
-            etag: force ? null : (previous?.sourceEtag ?? null),
-            lastModified: force ? null : (previous?.sourceLastModified ?? null),
+            etag: force || needsFullDeputyRanking ? null : (previous?.sourceEtag ?? null),
+            lastModified:
+              force || needsFullDeputyRanking ? null : (previous?.sourceLastModified ?? null),
           });
           report.fetched += 1;
           if (fetched.status === "not-modified") {
@@ -247,7 +252,7 @@ export class Collector {
     return {
       status,
       automatic: config.AUTO_SYNC_ENABLED,
-      pollingSeconds: 30,
+      pollingSeconds: 5,
       serverIntervalSeconds: config.TSE_POLL_INTERVAL_SECONDS,
       now: new Date().toISOString(),
       scheduledStart: FIRST_ROUND_START.toISOString(),
@@ -277,7 +282,7 @@ export class Collector {
       collector: {
         service: "campania-ninja-tse-collector",
         storage: "postgresql",
-        version: "1.1.1",
+        version: "1.1.2",
       },
     };
   }
